@@ -28,6 +28,7 @@ import torch.nn.functional as F
 import rfdetr.util.misc as utils
 from rfdetr.datasets.coco_eval import CocoEvaluator
 from rfdetr.datasets.coco import compute_multi_scale_scales
+from rfdetr.util.metrics import evaluate_detection_f1
 
 try:
     from torch.amp import autocast, GradScaler
@@ -264,6 +265,10 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, arg
     iou_types = tuple(k for k in ("segm", "bbox") if k in postprocessors.keys())
     coco_evaluator = CocoEvaluator(base_ds, iou_types)
 
+    # For center-based F1 metric
+    all_predictions = []
+    all_ground_truths = []
+
     for samples, targets in metric_logger.log_every(data_loader, 10, header):
         samples = samples.to(device)
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
@@ -318,6 +323,45 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, arg
         if coco_evaluator is not None:
             coco_evaluator.update(res)
 
+        # Collect predictions and ground truths for F1 metric
+        for target, output in zip(targets, results):
+            image_id = target["image_id"].item()
+
+            # Add predictions
+            if len(output["boxes"]) > 0:
+                boxes = output["boxes"].float().cpu().numpy()
+                # Convert from [x1, y1, x2, y2] to [x, y, w, h]
+                boxes_xywh = boxes.copy()
+                boxes_xywh[:, 2] = boxes[:, 2] - boxes[:, 0]  # width
+                boxes_xywh[:, 3] = boxes[:, 3] - boxes[:, 1]  # height
+
+                scores = output["scores"].float().cpu().numpy()
+                labels = output["labels"].float().cpu().numpy()
+
+                for box, score, label in zip(boxes_xywh, scores, labels):
+                    all_predictions.append({
+                        "image_id": image_id,
+                        "category_id": int(label),
+                        "bbox": box.tolist(),
+                        "score": float(score)
+                    })
+
+            # Add ground truths
+            gt_boxes = target["boxes"].float().cpu().numpy()
+            if len(gt_boxes) > 0:
+                # Convert from [x1, y1, x2, y2] to [x, y, w, h]
+                gt_boxes_xywh = gt_boxes.copy()
+                gt_boxes_xywh[:, 2] = gt_boxes[:, 2] - gt_boxes[:, 0]  # width
+                gt_boxes_xywh[:, 3] = gt_boxes[:, 3] - gt_boxes[:, 1]  # height
+
+                gt_labels = target["labels"].float().cpu().numpy()
+                for box, label in zip(gt_boxes_xywh, gt_labels):
+                    all_ground_truths.append({
+                        "image_id": image_id,
+                        "category_id": int(label),
+                        "bbox": box.tolist()
+                    })
+
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
@@ -337,4 +381,22 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, arg
 
         if "segm" in postprocessors.keys():
             stats["coco_eval_masks"] = coco_evaluator.coco_eval["segm"].stats.tolist()
+
+    # Compute center-based F1 metrics
+    if all_predictions and all_ground_truths:
+        # Get class names from base_ds
+        class_names = {cat['id']: cat['name'] for cat in base_ds.dataset['categories']}
+        f1_metrics = evaluate_detection_f1(
+            predictions=all_predictions,
+            ground_truths=all_ground_truths,
+            center_threshold=50.0,
+            score_threshold=0.5,
+            class_names=class_names
+        )
+        stats["f1_metrics"] = f1_metrics
+        print(f"\nCenter-based F1 Metrics (threshold=50px):")
+        print(f"  Overall F1: {f1_metrics['overall']['f1_score']:.4f}")
+        print(f"  Precision: {f1_metrics['overall']['precision']:.4f}")
+        print(f"  Recall: {f1_metrics['overall']['recall']:.4f}")
+
     return stats, coco_evaluator

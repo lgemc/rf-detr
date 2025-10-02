@@ -1,4 +1,5 @@
-from typing import Optional
+from typing import Optional, List, Dict, Tuple
+from collections import defaultdict
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -16,6 +17,204 @@ except ModuleNotFoundError:
 plt.ioff()
 
 PLOT_FILE_NAME = "metrics_plot.png"
+
+
+def calculate_box_center(bbox: List[float]) -> Tuple[float, float]:
+    """
+    Calculate center of a bounding box in COCO format [x, y, width, height].
+
+    Args:
+        bbox: Bounding box as [x, y, width, height]
+
+    Returns:
+        Tuple of (center_x, center_y)
+    """
+    x, y, w, h = bbox
+    return (x + w / 2, y + h / 2)
+
+
+def center_distance(bbox1: List[float], bbox2: List[float]) -> float:
+    """
+    Calculate Euclidean distance between centers of two boxes.
+
+    Args:
+        bbox1: First bounding box [x, y, width, height]
+        bbox2: Second bounding box [x, y, width, height]
+
+    Returns:
+        Euclidean distance between centers
+    """
+    cx1, cy1 = calculate_box_center(bbox1)
+    cx2, cy2 = calculate_box_center(bbox2)
+    return np.sqrt((cx1 - cx2) ** 2 + (cy1 - cy2) ** 2)
+
+
+def match_detections(
+    predictions: List[Dict],
+    ground_truths: List[Dict],
+    center_threshold: float = 50.0,
+    score_threshold: float = 0.5
+) -> Tuple[int, int, int, Dict]:
+    """
+    Match predictions to ground truths based on class and center proximity.
+
+    Args:
+        predictions: List of predictions with keys: image_id, category_id, bbox, score
+        ground_truths: List of ground truths with keys: image_id, category_id, bbox
+        center_threshold: Maximum center distance (in pixels) to consider a match
+        score_threshold: Minimum confidence score for predictions
+
+    Returns:
+        Tuple of (true_positives, false_positives, false_negatives, per_class_stats)
+    """
+    # Filter predictions by score threshold
+    predictions = [p for p in predictions if p.get('score', 1.0) >= score_threshold]
+
+    # Group by image_id for efficient matching
+    preds_by_image = defaultdict(list)
+    gts_by_image = defaultdict(list)
+
+    for pred in predictions:
+        preds_by_image[pred['image_id']].append(pred)
+
+    for gt in ground_truths:
+        gts_by_image[gt['image_id']].append(gt)
+
+    true_positives = 0
+    false_positives = 0
+    false_negatives = 0
+
+    per_class_stats = defaultdict(lambda: {'tp': 0, 'fp': 0, 'fn': 0})
+
+    # Get all unique image_ids
+    all_image_ids = set(list(preds_by_image.keys()) + list(gts_by_image.keys()))
+
+    for image_id in all_image_ids:
+        img_preds = preds_by_image.get(image_id, [])
+        img_gts = gts_by_image.get(image_id, [])
+
+        matched_gts = set()
+
+        # Sort predictions by score (highest first) for greedy matching
+        img_preds = sorted(img_preds, key=lambda x: x.get('score', 1.0), reverse=True)
+
+        for pred in img_preds:
+            pred_class = pred['category_id']
+            pred_bbox = pred['bbox']
+
+            best_match_idx = None
+            best_match_dist = center_threshold
+
+            # Find best matching ground truth
+            for idx, gt in enumerate(img_gts):
+                if idx in matched_gts:
+                    continue
+
+                if gt['category_id'] != pred_class:
+                    continue
+
+                dist = center_distance(pred_bbox, gt['bbox'])
+
+                if dist < best_match_dist:
+                    best_match_dist = dist
+                    best_match_idx = idx
+
+            if best_match_idx is not None:
+                # True positive
+                true_positives += 1
+                per_class_stats[pred_class]['tp'] += 1
+                matched_gts.add(best_match_idx)
+            else:
+                # False positive
+                false_positives += 1
+                per_class_stats[pred_class]['fp'] += 1
+
+        # Count unmatched ground truths as false negatives
+        for idx, gt in enumerate(img_gts):
+            if idx not in matched_gts:
+                false_negatives += 1
+                per_class_stats[gt['category_id']]['fn'] += 1
+
+    return true_positives, false_positives, false_negatives, dict(per_class_stats)
+
+
+def calculate_f1_score(tp: int, fp: int, fn: int) -> Tuple[float, float, float]:
+    """
+    Calculate precision, recall, and F1 score.
+
+    Args:
+        tp: True positives
+        fp: False positives
+        fn: False negatives
+
+    Returns:
+        Tuple of (precision, recall, f1_score)
+    """
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
+
+    return precision, recall, f1
+
+
+def evaluate_detection_f1(
+    predictions: List[Dict],
+    ground_truths: List[Dict],
+    center_threshold: float = 50.0,
+    score_threshold: float = 0.5,
+    class_names: Dict[int, str] = None
+) -> Dict:
+    """
+    Evaluate object detection predictions using F1 score with center-based matching.
+
+    Args:
+        predictions: List of predictions in COCO format
+                    Each dict should have: image_id, category_id, bbox [x,y,w,h], score
+        ground_truths: List of ground truths in COCO format
+                      Each dict should have: image_id, category_id, bbox [x,y,w,h]
+        center_threshold: Maximum center distance in pixels to consider a match
+        score_threshold: Minimum confidence score for predictions
+        class_names: Optional mapping of category_id to class names
+
+    Returns:
+        Dictionary with overall and per-class metrics
+    """
+    tp, fp, fn, per_class_stats = match_detections(
+        predictions, ground_truths, center_threshold, score_threshold
+    )
+
+    overall_precision, overall_recall, overall_f1 = calculate_f1_score(tp, fp, fn)
+
+    per_class_f1 = {}
+    for class_id, stats in per_class_stats.items():
+        precision, recall, f1 = calculate_f1_score(
+            stats['tp'], stats['fp'], stats['fn']
+        )
+        class_label = class_names.get(class_id, f"class_{class_id}") if class_names else f"class_{class_id}"
+        per_class_f1[class_label] = {
+            'precision': precision,
+            'recall': recall,
+            'f1_score': f1,
+            'tp': stats['tp'],
+            'fp': stats['fp'],
+            'fn': stats['fn']
+        }
+
+    return {
+        'overall': {
+            'precision': overall_precision,
+            'recall': overall_recall,
+            'f1_score': overall_f1,
+            'true_positives': tp,
+            'false_positives': fp,
+            'false_negatives': fn
+        },
+        'per_class': per_class_f1,
+        'config': {
+            'center_threshold': center_threshold,
+            'score_threshold': score_threshold
+        }
+    }
 
 
 def safe_index(arr, idx):
@@ -58,7 +257,22 @@ class MetricsPlotSink:
         ema_ap50 = np.array([safe_index(x, 1) for x in ema_coco_eval if x is not None], dtype=np.float32)
         ema_ar50_90 = np.array([safe_index(x, 8) for x in ema_coco_eval if x is not None], dtype=np.float32)
 
-        fig, axes = plt.subplots(2, 2, figsize=(18, 12))
+        # F1 metrics
+        test_f1 = [h.get('test_f1_metrics', {}).get('overall', {}).get('f1_score') for h in self.history]
+        test_f1 = np.array([x for x in test_f1 if x is not None], dtype=np.float32)
+        test_precision = [h.get('test_f1_metrics', {}).get('overall', {}).get('precision') for h in self.history]
+        test_precision = np.array([x for x in test_precision if x is not None], dtype=np.float32)
+        test_recall = [h.get('test_f1_metrics', {}).get('overall', {}).get('recall') for h in self.history]
+        test_recall = np.array([x for x in test_recall if x is not None], dtype=np.float32)
+
+        ema_f1 = [h.get('ema_test_f1_metrics', {}).get('overall', {}).get('f1_score') for h in self.history]
+        ema_f1 = np.array([x for x in ema_f1 if x is not None], dtype=np.float32)
+        ema_precision = [h.get('ema_test_f1_metrics', {}).get('overall', {}).get('precision') for h in self.history]
+        ema_precision = np.array([x for x in ema_precision if x is not None], dtype=np.float32)
+        ema_recall = [h.get('ema_test_f1_metrics', {}).get('overall', {}).get('recall') for h in self.history]
+        ema_recall = np.array([x for x in ema_recall if x is not None], dtype=np.float32)
+
+        fig, axes = plt.subplots(3, 2, figsize=(18, 18))
 
         # Subplot (0,0): Training and Validation Loss
         if len(epochs) > 0:
@@ -107,6 +321,34 @@ class MetricsPlotSink:
             axes[1][1].set_ylabel('AR')
             axes[1][1].legend()
             axes[1][1].grid(True)
+
+        # Subplot (2,0): Center-based F1 Score
+        if test_f1.size > 0 or ema_f1.size > 0:
+            if test_f1.size > 0:
+                axes[2][0].plot(epochs[:len(test_f1)], test_f1, marker='o', linestyle='-', label='Base Model')
+            if ema_f1.size > 0:
+                axes[2][0].plot(epochs[:len(ema_f1)], ema_f1, marker='o', linestyle='--', label='EMA Model')
+            axes[2][0].set_title('Center-based F1 Score (50px threshold)')
+            axes[2][0].set_xlabel('Epoch Number')
+            axes[2][0].set_ylabel('F1 Score')
+            axes[2][0].legend()
+            axes[2][0].grid(True)
+
+        # Subplot (2,1): Center-based Precision and Recall
+        if test_precision.size > 0 or test_recall.size > 0 or ema_precision.size > 0 or ema_recall.size > 0:
+            if test_precision.size > 0:
+                axes[2][1].plot(epochs[:len(test_precision)], test_precision, marker='o', linestyle='-', label='Base Precision')
+            if test_recall.size > 0:
+                axes[2][1].plot(epochs[:len(test_recall)], test_recall, marker='s', linestyle='-', label='Base Recall')
+            if ema_precision.size > 0:
+                axes[2][1].plot(epochs[:len(ema_precision)], ema_precision, marker='o', linestyle='--', label='EMA Precision')
+            if ema_recall.size > 0:
+                axes[2][1].plot(epochs[:len(ema_recall)], ema_recall, marker='s', linestyle='--', label='EMA Recall')
+            axes[2][1].set_title('Center-based Precision & Recall (50px threshold)')
+            axes[2][1].set_xlabel('Epoch Number')
+            axes[2][1].set_ylabel('Score')
+            axes[2][1].legend()
+            axes[2][1].grid(True)
 
         plt.tight_layout()
         plt.savefig(f"{self.output_dir}/{PLOT_FILE_NAME}")
@@ -164,6 +406,19 @@ class MetricsTensorBoardSink:
                 self.writer.add_scalar("Metrics/EMA/AP50", ema_ap50, epoch)
             if ema_ar50_90 is not None:
                 self.writer.add_scalar("Metrics/EMA/AR50_90", ema_ar50_90, epoch)
+
+        # F1 metrics
+        if 'test_f1_metrics' in values:
+            f1_data = values['test_f1_metrics']['overall']
+            self.writer.add_scalar("Metrics/Base/F1", f1_data['f1_score'], epoch)
+            self.writer.add_scalar("Metrics/Base/F1_Precision", f1_data['precision'], epoch)
+            self.writer.add_scalar("Metrics/Base/F1_Recall", f1_data['recall'], epoch)
+
+        if 'ema_test_f1_metrics' in values:
+            ema_f1_data = values['ema_test_f1_metrics']['overall']
+            self.writer.add_scalar("Metrics/EMA/F1", ema_f1_data['f1_score'], epoch)
+            self.writer.add_scalar("Metrics/EMA/F1_Precision", ema_f1_data['precision'], epoch)
+            self.writer.add_scalar("Metrics/EMA/F1_Recall", ema_f1_data['recall'], epoch)
 
         self.writer.flush()
 
@@ -233,6 +488,19 @@ class MetricsWandBSink:
                 log_dict["Metrics/EMA/AP50"] = ema_ap50
             if ema_ar50_90 is not None:
                 log_dict["Metrics/EMA/AR50_90"] = ema_ar50_90
+
+        # F1 metrics
+        if 'test_f1_metrics' in values:
+            f1_data = values['test_f1_metrics']['overall']
+            log_dict["Metrics/Base/F1"] = f1_data['f1_score']
+            log_dict["Metrics/Base/F1_Precision"] = f1_data['precision']
+            log_dict["Metrics/Base/F1_Recall"] = f1_data['recall']
+
+        if 'ema_test_f1_metrics' in values:
+            ema_f1_data = values['ema_test_f1_metrics']['overall']
+            log_dict["Metrics/EMA/F1"] = ema_f1_data['f1_score']
+            log_dict["Metrics/EMA/F1_Precision"] = ema_f1_data['precision']
+            log_dict["Metrics/EMA/F1_Recall"] = ema_f1_data['recall']
 
         wandb.log(log_dict)
 
