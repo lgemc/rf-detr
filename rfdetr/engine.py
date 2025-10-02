@@ -349,10 +349,18 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, arg
             # Add ground truths
             gt_boxes = target["boxes"].float().cpu().numpy()
             if len(gt_boxes) > 0:
-                # Convert from [x1, y1, x2, y2] to [x, y, w, h]
-                gt_boxes_xywh = gt_boxes.copy()
-                gt_boxes_xywh[:, 2] = gt_boxes[:, 2] - gt_boxes[:, 0]  # width
-                gt_boxes_xywh[:, 3] = gt_boxes[:, 3] - gt_boxes[:, 1]  # height
+                # Denormalize ground truth boxes from [0,1] to pixel coordinates
+                # Ground truth boxes are in normalized cxcywh format (center_x, center_y, width, height)
+                orig_h, orig_w = target["orig_size"].cpu().numpy()
+                gt_boxes_denorm = gt_boxes.copy()
+                gt_boxes_denorm[:, [0, 2]] *= orig_w  # cx and width
+                gt_boxes_denorm[:, [1, 3]] *= orig_h  # cy and height
+
+                # Convert from [cx, cy, w, h] to [x, y, w, h]
+                gt_boxes_xywh = gt_boxes_denorm.copy()
+                gt_boxes_xywh[:, 0] = gt_boxes_denorm[:, 0] - gt_boxes_denorm[:, 2] / 2  # x = cx - w/2
+                gt_boxes_xywh[:, 1] = gt_boxes_denorm[:, 1] - gt_boxes_denorm[:, 3] / 2  # y = cy - h/2
+                # width and height stay the same at positions 2 and 3
 
                 gt_labels = target["labels"].float().cpu().numpy()
                 for box, label in zip(gt_boxes_xywh, gt_labels):
@@ -384,13 +392,47 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, arg
 
     # Compute center-based F1 metrics
     if all_predictions and all_ground_truths:
+        # Debug: Log collected data
+        print(f"\n[F1 DEBUG] Data collected for F1 evaluation:")
+        print(f"  Total predictions collected: {len(all_predictions)}")
+        print(f"  Total ground truths collected: {len(all_ground_truths)}")
+
+        # Debug: Log score distribution of all predictions
+        all_scores = [p['score'] for p in all_predictions]
+        print(f"  Prediction score distribution:")
+        print(f"    Min: {min(all_scores):.4f}")
+        print(f"    Max: {max(all_scores):.4f}")
+        print(f"    Mean: {np.mean(all_scores):.4f}")
+        print(f"    Median: {np.median(all_scores):.4f}")
+        print(f"    Scores >= 0.5: {sum(1 for s in all_scores if s >= 0.5)}/{len(all_scores)} ({100*sum(1 for s in all_scores if s >= 0.5)/len(all_scores):.1f}%)")
+        print(f"    Scores >= 0.3: {sum(1 for s in all_scores if s >= 0.3)}/{len(all_scores)} ({100*sum(1 for s in all_scores if s >= 0.3)/len(all_scores):.1f}%)")
+        print(f"    Scores >= 0.1: {sum(1 for s in all_scores if s >= 0.1)}/{len(all_scores)} ({100*sum(1 for s in all_scores if s >= 0.1)/len(all_scores):.1f}%)")
+
+        # Debug: Log sample predictions
+        print(f"\n[F1 DEBUG] Sample predictions (first 5):")
+        for i, pred in enumerate(all_predictions[:5]):
+            print(f"  {i}: img_id={pred['image_id']}, class={pred['category_id']}, score={pred['score']:.4f}, bbox={pred['bbox']}")
+
+        # Debug: Log sample ground truths
+        print(f"\n[F1 DEBUG] Sample ground truths (first 5):")
+        for i, gt in enumerate(all_ground_truths[:5]):
+            print(f"  {i}: img_id={gt['image_id']}, class={gt['category_id']}, bbox={gt['bbox']}")
+
+        # Debug: Log class distribution
+        from collections import Counter
+        pred_classes = Counter([p['category_id'] for p in all_predictions])
+        gt_classes = Counter([g['category_id'] for g in all_ground_truths])
+        print(f"\n[F1 DEBUG] Class distribution:")
+        print(f"  Prediction classes: {dict(pred_classes)}")
+        print(f"  Ground truth classes: {dict(gt_classes)}")
+
         # Get class names from base_ds
         class_names = {cat['id']: cat['name'] for cat in base_ds.dataset['categories']}
         f1_metrics = evaluate_detection_f1(
             predictions=all_predictions,
             ground_truths=all_ground_truths,
             center_threshold=50.0,
-            score_threshold=0.5,
+            score_threshold=0.3,
             class_names=class_names
         )
         stats["f1_metrics"] = f1_metrics

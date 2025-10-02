@@ -67,8 +67,23 @@ def match_detections(
     Returns:
         Tuple of (true_positives, false_positives, false_negatives, per_class_stats)
     """
+    # Debug: Log initial counts
+    print(f"\n[F1 DEBUG] match_detections called:")
+    print(f"  Total predictions before filtering: {len(predictions)}")
+    print(f"  Total ground truths: {len(ground_truths)}")
+    print(f"  Score threshold: {score_threshold}")
+    print(f"  Center threshold: {center_threshold}px")
+
+    # Debug: Log score distribution
+    if predictions:
+        scores = [p.get('score', 1.0) for p in predictions]
+        print(f"  Prediction scores - min: {min(scores):.4f}, max: {max(scores):.4f}, mean: {np.mean(scores):.4f}")
+
     # Filter predictions by score threshold
     predictions = [p for p in predictions if p.get('score', 1.0) >= score_threshold]
+
+    # Debug: Log after filtering
+    print(f"  Predictions after score filtering: {len(predictions)}")
 
     # Group by image_id for efficient matching
     preds_by_image = defaultdict(list)
@@ -89,6 +104,20 @@ def match_detections(
     # Get all unique image_ids
     all_image_ids = set(list(preds_by_image.keys()) + list(gts_by_image.keys()))
 
+    # Debug: Log image counts
+    print(f"  Total unique images: {len(all_image_ids)}")
+    print(f"  Images with predictions: {len(preds_by_image)}")
+    print(f"  Images with ground truths: {len(gts_by_image)}")
+
+    # Debug: Sample first few images
+    sample_images = list(all_image_ids)[:3]
+    print(f"\n[F1 DEBUG] Sample image statistics:")
+    for img_id in sample_images:
+        num_preds = len(preds_by_image.get(img_id, []))
+        num_gts = len(gts_by_image.get(img_id, []))
+        print(f"  Image {img_id}: {num_preds} predictions, {num_gts} ground truths")
+
+    matches_found = 0
     for image_id in all_image_ids:
         img_preds = preds_by_image.get(image_id, [])
         img_gts = gts_by_image.get(image_id, [])
@@ -98,14 +127,19 @@ def match_detections(
         # Sort predictions by score (highest first) for greedy matching
         img_preds = sorted(img_preds, key=lambda x: x.get('score', 1.0), reverse=True)
 
-        for pred in img_preds:
+        # Debug: Log details for first few images
+        log_details = image_id in sample_images
+
+        for pred_idx, pred in enumerate(img_preds):
             pred_class = pred['category_id']
             pred_bbox = pred['bbox']
+            pred_score = pred.get('score', 1.0)
 
             best_match_idx = None
             best_match_dist = center_threshold
 
             # Find best matching ground truth
+            candidates = []
             for idx, gt in enumerate(img_gts):
                 if idx in matched_gts:
                     continue
@@ -114,16 +148,32 @@ def match_detections(
                     continue
 
                 dist = center_distance(pred_bbox, gt['bbox'])
+                candidates.append((idx, dist))
 
                 if dist < best_match_dist:
                     best_match_dist = dist
                     best_match_idx = idx
+
+            # Debug: Log matching attempt for sample images
+            if log_details and pred_idx < 3:  # Only first 3 predictions per sample image
+                print(f"    Pred {pred_idx} (class={pred_class}, score={pred_score:.4f}, bbox={pred_bbox}):")
+                if candidates:
+                    print(f"      Candidates: {len(candidates)} GTs with same class")
+                    for cand_idx, cand_dist in candidates[:3]:  # Show first 3 candidates
+                        print(f"        GT {cand_idx}: distance={cand_dist:.2f}px")
+                else:
+                    print(f"      No candidates found (no GTs with class {pred_class} or all matched)")
+                if best_match_idx is not None:
+                    print(f"      ✓ Matched with GT {best_match_idx} (distance={best_match_dist:.2f}px)")
+                else:
+                    print(f"      ✗ No match found (best distance > {center_threshold}px)")
 
             if best_match_idx is not None:
                 # True positive
                 true_positives += 1
                 per_class_stats[pred_class]['tp'] += 1
                 matched_gts.add(best_match_idx)
+                matches_found += 1
             else:
                 # False positive
                 false_positives += 1
@@ -134,6 +184,20 @@ def match_detections(
             if idx not in matched_gts:
                 false_negatives += 1
                 per_class_stats[gt['category_id']]['fn'] += 1
+
+    # Debug: Log final counts
+    print(f"\n[F1 DEBUG] Matching results:")
+    print(f"  True Positives (TP): {true_positives}")
+    print(f"  False Positives (FP): {false_positives}")
+    print(f"  False Negatives (FN): {false_negatives}")
+    print(f"  Total matches found: {matches_found}")
+    print(f"  Match rate: {matches_found}/{len(predictions)} predictions = {100*matches_found/max(len(predictions),1):.1f}%")
+
+    # Debug: Log per-class stats
+    if per_class_stats:
+        print(f"\n[F1 DEBUG] Per-class stats:")
+        for class_id, stats in sorted(per_class_stats.items()):
+            print(f"    Class {class_id}: TP={stats['tp']}, FP={stats['fp']}, FN={stats['fn']}")
 
     return true_positives, false_positives, false_negatives, dict(per_class_stats)
 
@@ -179,11 +243,20 @@ def evaluate_detection_f1(
     Returns:
         Dictionary with overall and per-class metrics
     """
+    print(f"\n[F1 DEBUG] evaluate_detection_f1 called with:")
+    print(f"  center_threshold={center_threshold}, score_threshold={score_threshold}")
+
     tp, fp, fn, per_class_stats = match_detections(
         predictions, ground_truths, center_threshold, score_threshold
     )
 
     overall_precision, overall_recall, overall_f1 = calculate_f1_score(tp, fp, fn)
+
+    # Debug: Log final F1 calculation
+    print(f"\n[F1 DEBUG] Final F1 Score Calculation:")
+    print(f"  Precision = {tp} / ({tp} + {fp}) = {overall_precision:.4f}")
+    print(f"  Recall = {tp} / ({tp} + {fn}) = {overall_recall:.4f}")
+    print(f"  F1 = 2 * ({overall_precision:.4f} * {overall_recall:.4f}) / ({overall_precision:.4f} + {overall_recall:.4f}) = {overall_f1:.4f}")
 
     per_class_f1 = {}
     for class_id, stats in per_class_stats.items():

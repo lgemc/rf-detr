@@ -263,7 +263,8 @@ class SetCriterion(nn.Module):
                  sum_group_losses=False,
                  use_varifocal_loss=False,
                  use_position_supervised_loss=False,
-                 ia_bce_loss=False,):
+                 ia_bce_loss=False,
+                 class_weights=None,):
         """ Create the criterion.
         Parameters:
             num_classes: number of object categories, omitting the special no-object category
@@ -283,6 +284,7 @@ class SetCriterion(nn.Module):
         self.sum_group_losses = sum_group_losses
         self.use_varifocal_loss = use_varifocal_loss
         self.use_position_supervised_loss = use_position_supervised_loss
+        self.class_weights = class_weights
         self.ia_bce_loss = ia_bce_loss
 
     def loss_labels(self, outputs, targets, indices, num_boxes, log=True):
@@ -370,7 +372,7 @@ class SetCriterion(nn.Module):
             target_classes_onehot.scatter_(2, target_classes.unsqueeze(-1), 1)
 
             target_classes_onehot = target_classes_onehot[:,:,:-1]
-            loss_ce = sigmoid_focal_loss(src_logits, target_classes_onehot, num_boxes, alpha=self.focal_alpha, gamma=2) * src_logits.shape[1]
+            loss_ce = sigmoid_focal_loss(src_logits, target_classes_onehot, num_boxes, alpha=self.focal_alpha, gamma=2, class_weights=self.class_weights) * src_logits.shape[1]
         losses = {'loss_ce': loss_ce}
 
         if log:
@@ -489,7 +491,7 @@ class SetCriterion(nn.Module):
         return losses
 
 
-def sigmoid_focal_loss(inputs, targets, num_boxes, alpha: float = 0.25, gamma: float = 2):
+def sigmoid_focal_loss(inputs, targets, num_boxes, alpha: float = 0.25, gamma: float = 2, class_weights=None):
     """
     Loss used in RetinaNet for dense detection: https://arxiv.org/abs/1708.02002.
     Args:
@@ -502,6 +504,7 @@ def sigmoid_focal_loss(inputs, targets, num_boxes, alpha: float = 0.25, gamma: f
                 positive vs negative examples. Default = -1 (no weighting).
         gamma: Exponent of the modulating factor (1 - p_t) to
                balance easy vs hard examples.
+        class_weights: (optional) Per-class weighting factor. List or tensor of length num_classes.
     Returns:
         Loss tensor
     """
@@ -513,6 +516,14 @@ def sigmoid_focal_loss(inputs, targets, num_boxes, alpha: float = 0.25, gamma: f
     if alpha >= 0:
         alpha_t = alpha * targets + (1 - alpha) * (1 - targets)
         loss = alpha_t * loss
+
+    if class_weights is not None:
+        # class_weights: [num_classes]
+        # targets: [batch, num_queries, num_classes]
+        # loss: [batch, num_queries, num_classes]
+        weights_tensor = torch.tensor(class_weights, dtype=loss.dtype, device=loss.device)
+        # Broadcast weights to match loss shape
+        loss = loss * weights_tensor.view(1, 1, -1)
 
     return loss.mean(1).sum() / num_boxes
 
@@ -671,12 +682,14 @@ def build_criterion_and_postprocessors(args):
         sum_group_losses = args.sum_group_losses
     except:
         sum_group_losses = False
+    class_weights = getattr(args, 'class_weights', None)
     criterion = SetCriterion(args.num_classes + 1, matcher=matcher, weight_dict=weight_dict,
-                             focal_alpha=args.focal_alpha, losses=losses, 
+                             focal_alpha=args.focal_alpha, losses=losses,
                              group_detr=args.group_detr, sum_group_losses=sum_group_losses,
                              use_varifocal_loss = args.use_varifocal_loss,
                              use_position_supervised_loss=args.use_position_supervised_loss,
-                             ia_bce_loss=args.ia_bce_loss)
+                             ia_bce_loss=args.ia_bce_loss,
+                             class_weights=class_weights)
     criterion.to(device)
     postprocessors = {'bbox': PostProcess(num_select=args.num_select)}
 

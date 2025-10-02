@@ -140,3 +140,4 @@ class TrainConfig(BaseModel):
     run: Optional[str] = None
     class_names: List[str] = None
     run_test: bool = True
+    class_weights: Optional[List[float]] = None
