@@ -29,6 +29,9 @@ from rfdetr.config import (
     RFDETRNanoConfig,
     RFDETRSmallConfig,
     RFDETRMediumConfig,
+    RFDETRDinoV3SmallConfig,
+    RFDETRDinoV3BaseConfig,
+    RFDETRDinoV3LargeConfig,
     TrainConfig,
     ModelConfig
 )
@@ -283,7 +286,11 @@ class RFDETR:
 
             img_tensor = img_tensor.to(self.model.device)
             img_tensor = F.normalize(img_tensor, self.means, self.stds)
-            img_tensor = F.resize(img_tensor, (self.model.resolution, self.model.resolution))
+
+            # Only resize if needed
+            if h != self.model.resolution or w != self.model.resolution:
+                print(self.model.resolution, h, w, "sizes")
+                img_tensor = F.resize(img_tensor, (self.model.resolution, self.model.resolution))
 
             processed_images.append(img_tensor)
 
@@ -445,6 +452,73 @@ class RFDETRMedium(RFDETR):
     size = "rfdetr-medium"
     def get_model_config(self, **kwargs):
         return RFDETRMediumConfig(**kwargs)
+
+    def get_train_config(self, **kwargs):
+        return TrainConfig(**kwargs)
+
+
+# DINOv3-based models
+class RFDETRDinoV3Small(RFDETR):
+    """
+    RF-DETR with DINOv3 Small backbone.
+
+    Uses Meta's DINOv3 small model with:
+    - RoPE (Rotary Position Embeddings)
+    - Storage tokens for improved representation
+    - SwiGLU FFN
+    - 12 transformer layers with 384 hidden dim
+
+    This model provides better feature representations than DINOv2
+    at a similar computational cost.
+    """
+    size = "rfdetr-dinov3-small"
+
+    def get_model_config(self, **kwargs):
+        return RFDETRDinoV3SmallConfig(**kwargs)
+
+    def get_train_config(self, **kwargs):
+        return TrainConfig(**kwargs)
+
+
+class RFDETRDinoV3Base(RFDETR):
+    """
+    RF-DETR with DINOv3 Base backbone.
+
+    Uses Meta's DINOv3 base model with:
+    - RoPE (Rotary Position Embeddings)
+    - Storage tokens for improved representation
+    - SwiGLU FFN
+    - 12 transformer layers with 768 hidden dim
+
+    This model provides significantly better feature representations
+    than DINOv2 base, especially on complex datasets.
+    """
+    size = "rfdetr-dinov3-base"
+
+    def get_model_config(self, **kwargs):
+        return RFDETRDinoV3BaseConfig(**kwargs)
+
+    def get_train_config(self, **kwargs):
+        return TrainConfig(**kwargs)
+
+
+class RFDETRDinoV3Large(RFDETR):
+    """
+    RF-DETR with DINOv3 Large backbone.
+
+    Uses Meta's DINOv3 large model with:
+    - RoPE (Rotary Position Embeddings)
+    - Storage tokens for improved representation
+    - SwiGLU FFN
+    - 24 transformer layers with 1024 hidden dim
+
+    This is the most powerful RF-DETR variant, suitable for
+    challenging detection tasks where accuracy is critical.
+    """
+    size = "rfdetr-dinov3-large"
+
+    def get_model_config(self, **kwargs):
+        return RFDETRDinoV3LargeConfig(**kwargs)
 
     def get_train_config(self, **kwargs):
         return TrainConfig(**kwargs)

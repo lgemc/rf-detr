@@ -74,6 +74,7 @@ def build_backbone(
     patch_size,
     num_windows,
     positional_encoding_size,
+    dinov3_weights_path=None,
 ):
     """
     Useful args:
@@ -104,6 +105,7 @@ def build_backbone(
         patch_size=patch_size,
         num_windows=num_windows,
         positional_encoding_size=positional_encoding_size,
+        dinov3_weights_path=dinov3_weights_path,
     )
 
     model = Joiner(backbone, position_embedding)

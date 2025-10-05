@@ -640,6 +640,7 @@ def build_model(args):
         patch_size=args.patch_size,
         num_windows=args.num_windows,
         positional_encoding_size=args.positional_encoding_size,
+        dinov3_weights_path=args.dinov3_weights_path if hasattr(args, 'dinov3_weights_path') else None,
     )
     if args.encoder_only:
         return backbone[0].encoder, None, None

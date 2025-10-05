@@ -3,17 +3,17 @@
 Train RF-DETR on Wildlife dataset
 """
 
-from rfdetr import RFDETRNano
+from rfdetr import RFDETRBase
 
 # Initialize model
-model = RFDETRNano()
+model = RFDETRBase()
 
 # Train
 model.train(
-    dataset_dir='/home/lmanrique/Do/WildlifeMapper/data/rfdetr_format',
+    dataset_dir='/home/lmanrique/Do/WildlifeMapper/data/rfdetr_format_560/',
     epochs=100,
-    batch_size=6,
-    # resume="wildlife_output/checkpoint.pth",
+    batch_size=3,
+    resume="wildlife_output/checkpoint.pth",  # Uncommented to resume training
     grad_accum_steps=4,
     output_dir='wildlife_output',
     checkpoint_interval=10,

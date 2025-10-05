@@ -11,7 +11,13 @@ import torch
 DEVICE = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
 
 class ModelConfig(BaseModel):
-    encoder: Literal["dinov2_windowed_small", "dinov2_windowed_base"]
+    encoder: Literal[
+        "dinov2_windowed_small",
+        "dinov2_windowed_base",
+        "dinov3_small",
+        "dinov3_base",
+        "dinov3_large"
+    ]
     out_feature_indexes: List[int]
     dec_layers: int
     two_stage: bool = True
@@ -33,6 +39,7 @@ class ModelConfig(BaseModel):
     group_detr: int = 13
     gradient_checkpointing: bool = False
     positional_encoding_size: int
+    dinov3_weights_path: Optional[str] = None  # Path to custom DINOv3 weights
 
 class RFDETRBaseConfig(ModelConfig):
     """
@@ -101,6 +108,86 @@ class RFDETRMediumConfig(RFDETRBaseConfig):
     resolution: int = 576
     positional_encoding_size: int = 36
     pretrain_weights: Optional[str] = "rf-detr-medium.pth"
+
+
+# DINOv3-based configurations
+class RFDETRDinoV3SmallConfig(ModelConfig):
+    """
+    RF-DETR with DINOv3 Small backbone.
+
+    DINOv3 features:
+    - RoPE (Rotary Position Embeddings)
+    - Storage tokens for improved representation
+    - SwiGLU FFN
+    - 12 transformer layers with 384 hidden dim
+    """
+    encoder: Literal["dinov3_small"] = "dinov3_small"
+    hidden_dim: int = 256
+    patch_size: int = 16  # Fixed for DINOv3
+    num_windows: int = 1  # No windowed attention for DINOv3 yet
+    dec_layers: int = 3
+    sa_nheads: int = 8
+    ca_nheads: int = 16
+    dec_n_points: int = 2
+    num_queries: int = 300
+    num_select: int = 300
+    projector_scale: List[Literal["P3", "P4", "P5"]] = ["P4"]
+    out_feature_indexes: List[int] = [2, 5, 8, 11]  # Similar to DINOv2 small
+    pretrain_weights: Optional[str] = None  # No pretrained weights yet
+    resolution: int = 512
+    positional_encoding_size: int = 32
+
+class RFDETRDinoV3BaseConfig(ModelConfig):
+    """
+    RF-DETR with DINOv3 Base backbone.
+
+    DINOv3 features:
+    - RoPE (Rotary Position Embeddings)
+    - Storage tokens for improved representation
+    - SwiGLU FFN
+    - 12 transformer layers with 768 hidden dim
+    """
+    encoder: Literal["dinov3_base"] = "dinov3_base"
+    hidden_dim: int = 384
+    patch_size: int = 16  # Fixed for DINOv3
+    num_windows: int = 1  # No windowed attention for DINOv3 yet
+    dec_layers: int = 3
+    sa_nheads: int = 12
+    ca_nheads: int = 24
+    dec_n_points: int = 4
+    num_queries: int = 300
+    num_select: int = 300
+    projector_scale: List[Literal["P3", "P4", "P5"]] = ["P3", "P5"]
+    out_feature_indexes: List[int] = [2, 5, 8, 11]  # Similar to DINOv2 base
+    pretrain_weights: Optional[str] = None  # No pretrained weights yet
+    resolution: int = 560
+    positional_encoding_size: int = 35
+
+class RFDETRDinoV3LargeConfig(ModelConfig):
+    """
+    RF-DETR with DINOv3 Large backbone.
+
+    DINOv3 features:
+    - RoPE (Rotary Position Embeddings)
+    - Storage tokens for improved representation
+    - SwiGLU FFN
+    - 24 transformer layers with 1024 hidden dim
+    """
+    encoder: Literal["dinov3_large"] = "dinov3_large"
+    hidden_dim: int = 512
+    patch_size: int = 16  # Fixed for DINOv3
+    num_windows: int = 1  # No windowed attention for DINOv3 yet
+    dec_layers: int = 4
+    sa_nheads: int = 16
+    ca_nheads: int = 32
+    dec_n_points: int = 4
+    num_queries: int = 300
+    num_select: int = 300
+    projector_scale: List[Literal["P3", "P4", "P5"]] = ["P3", "P4", "P5"]
+    out_feature_indexes: List[int] = [5, 11, 17, 23]  # Spread across 24 layers
+    pretrain_weights: Optional[str] = None  # No pretrained weights yet
+    resolution: int = 640
+    positional_encoding_size: int = 40
 
 class TrainConfig(BaseModel):
     lr: float = 1e-4

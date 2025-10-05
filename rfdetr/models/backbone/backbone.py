@@ -29,6 +29,7 @@ from rfdetr.util.misc import NestedTensor, is_main_process
 from rfdetr.models.backbone.base import BackboneBase
 from rfdetr.models.backbone.projector import MultiScaleProjector
 from rfdetr.models.backbone.dinov2 import DinoV2
+from rfdetr.models.backbone.dinov3 import DinoV3
 
 __all__ = ["Backbone"]
 
@@ -54,37 +55,65 @@ class Backbone(BackboneBase):
                  patch_size: int = 14,
                  num_windows: int = 4,
                  positional_encoding_size: bool = False,
+                 dinov3_weights_path: str = None,
                  ):
         super().__init__()
-        # an example name here would be "dinov2_base" or "dinov2_registers_windowed_base"
-        # if "registers" is in the name, then use_registers is set to True, otherwise it is set to False
-        # similarly, if "windowed" is in the name, then use_windowed_attn is set to True, otherwise it is set to False
-        # the last part of the name should be the size
-        # and the start should be dinov2
+        # Parse backbone name to determine which backbone to use
+        # Examples:
+        # - "dinov2_base" or "dinov2_registers_windowed_base" -> DINOv2
+        # - "dinov3_base" or "dinov3_storage_base" -> DINOv3
         name_parts = name.split("_")
-        assert name_parts[0] == "dinov2"
-        size = name_parts[-1]
-        use_registers = False
-        if "registers" in name_parts:
-            use_registers = True
-            name_parts.remove("registers")
-        use_windowed_attn = False
-        if "windowed" in name_parts:
-            use_windowed_attn = True
-            name_parts.remove("windowed")
-        assert len(name_parts) == 2, "name should be dinov2, then either registers, windowed, both, or none, then the size"
-        self.encoder = DinoV2(
-            size=name_parts[-1],
-            out_feature_indexes=out_feature_indexes,
-            shape=target_shape,
-            use_registers=use_registers,
-            use_windowed_attn=use_windowed_attn,
-            gradient_checkpointing=gradient_checkpointing,
-            load_dinov2_weights=load_dinov2_weights,
-            patch_size=patch_size,
-            num_windows=num_windows,
-            positional_encoding_size=positional_encoding_size,
-        )
+        backbone_type = name_parts[0]
+
+        assert backbone_type in ["dinov2", "dinov3"], f"Backbone type must be 'dinov2' or 'dinov3', got '{backbone_type}'"
+
+        if backbone_type == "dinov2":
+            # DINOv2 backbone with optional registers and windowed attention
+            size = name_parts[-1]
+            use_registers = False
+            if "registers" in name_parts:
+                use_registers = True
+                name_parts.remove("registers")
+            use_windowed_attn = False
+            if "windowed" in name_parts:
+                use_windowed_attn = True
+                name_parts.remove("windowed")
+            assert len(name_parts) == 2, "name should be dinov2, then either registers, windowed, both, or none, then the size"
+            self.encoder = DinoV2(
+                size=name_parts[-1],
+                out_feature_indexes=out_feature_indexes,
+                shape=target_shape,
+                use_registers=use_registers,
+                use_windowed_attn=use_windowed_attn,
+                gradient_checkpointing=gradient_checkpointing,
+                load_dinov2_weights=load_dinov2_weights,
+                patch_size=patch_size,
+                num_windows=num_windows,
+                positional_encoding_size=positional_encoding_size,
+            )
+        elif backbone_type == "dinov3":
+            # DINOv3 backbone with RoPE and storage tokens
+            size = name_parts[-1]
+            use_storage_tokens = True
+            if "nostorage" in name_parts:
+                use_storage_tokens = False
+                name_parts.remove("nostorage")
+
+            # For DINOv3, patch_size is always 16
+            if patch_size != 16:
+                print(f"Warning: DINOv3 uses patch_size=16, ignoring requested patch_size={patch_size}")
+                patch_size = 16
+
+            self.encoder = DinoV3(
+                size=size,
+                out_feature_indexes=out_feature_indexes,
+                shape=target_shape,
+                use_storage_tokens=use_storage_tokens,
+                gradient_checkpointing=gradient_checkpointing,
+                load_dinov3_weights=load_dinov2_weights,  # Reuse the same flag
+                patch_size=patch_size,
+                dinov3_weights_path=dinov3_weights_path,
+            )
         # build encoder + projector as backbone module
         if freeze_encoder:
             for param in self.encoder.parameters():
@@ -176,6 +205,7 @@ class Backbone(BackboneBase):
 def get_dinov2_lr_decay_rate(name, lr_decay_rate=1.0, num_layers=12):
     """
     Calculate lr decay rate for different ViT blocks.
+    Works for both DINOv2 and DINOv3 backbones.
 
     Args:
         name (string): parameter name.
@@ -186,20 +216,34 @@ def get_dinov2_lr_decay_rate(name, lr_decay_rate=1.0, num_layers=12):
     """
     layer_id = num_layers + 1
     if name.startswith("backbone"):
-        if "embeddings" in name:
+        if "embeddings" in name or "patch_embed" in name:
             layer_id = 0
         elif ".layer." in name and ".residual." not in name:
             layer_id = int(name[name.find(".layer.") :].split(".")[2]) + 1
+        elif ".blocks." in name:
+            # DINOv3 uses .blocks. instead of .layer.
+            try:
+                layer_id = int(name.split(".blocks.")[1].split(".")[0]) + 1
+            except (IndexError, ValueError):
+                pass
     return lr_decay_rate ** (num_layers + 1 - layer_id)
 
 def get_dinov2_weight_decay_rate(name, weight_decay_rate=1.0):
+    """
+    Calculate weight decay rate for different parameters.
+    Works for both DINOv2 and DINOv3 backbones.
+    """
     if (
         ("gamma" in name)
         or ("pos_embed" in name)
+        or ("rope_embed" in name)  # DINOv3 RoPE embeddings
         or ("rel_pos" in name)
         or ("bias" in name)
         or ("norm" in name)
         or ("embeddings" in name)
+        or ("cls_token" in name)
+        or ("storage_tokens" in name)  # DINOv3 storage tokens
+        or ("register_tokens" in name)  # DINOv2 register tokens
     ):
         weight_decay_rate = 0.0
     return weight_decay_rate
