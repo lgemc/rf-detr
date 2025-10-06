@@ -516,6 +516,9 @@ class RFDETRDinoV3Large(RFDETR):
     challenging detection tasks where accuracy is critical.
     """
     size = "rfdetr-dinov3-large"
+    # Satellite imagery normalization for DINOv3 SAT-493M weights
+    means = [0.430, 0.411, 0.296]
+    stds = [0.213, 0.156, 0.143]
 
     def get_model_config(self, **kwargs):
         return RFDETRDinoV3LargeConfig(**kwargs)

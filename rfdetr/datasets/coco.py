@@ -100,7 +100,8 @@ def make_coco_transforms(image_set, resolution, multi_scale=False, expanded_scal
 
     normalize = T.Compose([
         T.ToTensor(),
-        T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        # Satellite imagery normalization for DINOv3 SAT-493M weights
+        T.Normalize([0.430, 0.411, 0.296], [0.213, 0.156, 0.143])
     ])
 
     scales = [resolution]
@@ -145,7 +146,8 @@ def make_coco_transforms_square_div_64(image_set, resolution, multi_scale=False,
 
     normalize = T.Compose([
         T.ToTensor(),
-        T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        # Satellite imagery normalization for DINOv3 SAT-493M weights
+        T.Normalize([0.430, 0.411, 0.296], [0.213, 0.156, 0.143])
     ])
 
 
