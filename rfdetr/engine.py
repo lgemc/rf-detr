@@ -264,6 +264,11 @@ def evaluate(model, criterion, postprocess, data_loader, base_ds, device, args=N
     iou_types = ("bbox",) if not args.segmentation_head else ("bbox", "segm")
     coco_evaluator = CocoEvaluator(base_ds, iou_types)
 
+    # Collect predictions for F1 calculation
+    all_predictions = []
+    all_ground_truths = []
+    compute_f1 = getattr(args, 'compute_f1', False)
+
     for samples, targets in metric_logger.log_every(data_loader, 10, header):
         samples = samples.to(device)
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
@@ -318,6 +323,13 @@ def evaluate(model, criterion, postprocess, data_loader, base_ds, device, args=N
         if coco_evaluator is not None:
             coco_evaluator.update(res)
 
+        # Collect for F1 metric
+        if compute_f1:
+            from rfdetr.f1_metric import collect_predictions_and_gts
+            preds, gts = collect_predictions_and_gts(results_all, targets)
+            all_predictions.extend(preds)
+            all_ground_truths.extend(gts)
+
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
@@ -338,4 +350,14 @@ def evaluate(model, criterion, postprocess, data_loader, base_ds, device, args=N
         if "segm" in iou_types:
             results_json = coco_extended_metrics(coco_evaluator.coco_eval["segm"])
             stats["coco_eval_masks"] = coco_evaluator.coco_eval["segm"].stats.tolist()
+
+    # Calculate F1 metric if requested
+    if compute_f1 and all_predictions and all_ground_truths:
+        from rfdetr.f1_metric import calculate_f1
+        f1_threshold = getattr(args, 'f1_center_threshold', 50.0)
+        f1_score_threshold = getattr(args, 'f1_score_threshold', 0.5)
+        f1_metrics = calculate_f1(all_predictions, all_ground_truths, f1_threshold, f1_score_threshold)
+        stats['f1_metric'] = f1_metrics
+        print(f"F1 Score: {f1_metrics['f1']:.4f} (P: {f1_metrics['precision']:.4f}, R: {f1_metrics['recall']:.4f})")
+
     return stats, coco_evaluator

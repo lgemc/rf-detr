@@ -159,6 +159,9 @@ class TrainConfig(BaseModel):
     class_names: List[str] = None
     run_test: bool = True
     segmentation_head: bool = False
+    compute_f1: bool = False
+    f1_center_threshold: float = 50.0
+    f1_score_threshold: float = 0.5
 
 
 class SegmentationTrainConfig(TrainConfig):

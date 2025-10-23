@@ -234,6 +234,26 @@ class MetricsWandBSink:
             if ema_ar50_90 is not None:
                 log_dict["Metrics/EMA/AR50_90"] = ema_ar50_90
 
+        # Log F1 metrics for base model
+        if 'test_f1_metric' in values:
+            f1_metric = values['test_f1_metric']
+            if 'f1' in f1_metric:
+                log_dict["Metrics/Base/F1"] = f1_metric['f1']
+            if 'precision' in f1_metric:
+                log_dict["Metrics/Base/Precision"] = f1_metric['precision']
+            if 'recall' in f1_metric:
+                log_dict["Metrics/Base/Recall"] = f1_metric['recall']
+
+        # Log F1 metrics for EMA model
+        if 'ema_test_f1_metric' in values:
+            ema_f1_metric = values['ema_test_f1_metric']
+            if 'f1' in ema_f1_metric:
+                log_dict["Metrics/EMA/F1"] = ema_f1_metric['f1']
+            if 'precision' in ema_f1_metric:
+                log_dict["Metrics/EMA/Precision"] = ema_f1_metric['precision']
+            if 'recall' in ema_f1_metric:
+                log_dict["Metrics/EMA/Recall"] = ema_f1_metric['recall']
+
         wandb.log(log_dict)
 
     def close(self):
