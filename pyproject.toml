@@ -58,7 +58,9 @@ dependencies = [
     "pydantic",
     "supervision",
     "matplotlib",
-    "roboflow"
+    "roboflow",
+    "torchmetrics>=1.8.2",
+    "termcolor>=3.1.0",
 ]
 
 [project.optional-dependencies]

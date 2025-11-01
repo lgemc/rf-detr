@@ -803,6 +803,10 @@ def build_model(args):
         patch_size=args.patch_size,
         num_windows=args.num_windows,
         positional_encoding_size=args.positional_encoding_size,
+        dinov3_repo_dir=getattr(args, 'dinov3_repo_dir', None),
+        dinov3_weights_path=getattr(args, 'dinov3_weights_path', None),
+        dinov3_hf_token=getattr(args, 'dinov3_hf_token', None),
+        dinov3_prefer_hf=getattr(args, 'dinov3_prefer_hf', True),
     )
     if args.encoder_only:
         return backbone[0].encoder, None, None
