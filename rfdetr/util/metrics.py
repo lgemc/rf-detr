@@ -186,7 +186,8 @@ class MetricsWandBSink:
 
     def __init__(self, output_dir: str, project: Optional[str] = None, run: Optional[str] = None, config: Optional[dict] = None):
         self.output_dir = output_dir
-        if wandb:
+        from rfdetr.util.misc import is_main_process
+        if wandb and is_main_process():
             self.run = wandb.init(
                 project=project,
                 name=run,
@@ -196,7 +197,8 @@ class MetricsWandBSink:
             print(f"W&B logging initialized. To monitor logs, open {wandb.run.url}.")
         else:
             self.run = None
-            print("Unable to initialize W&B. Logging is turned off for this session. Run 'pip install wandb' to enable logging.")
+            if not wandb and is_main_process():
+                print("Unable to initialize W&B. Logging is turned off for this session. Run 'pip install wandb' to enable logging.")
 
     def update(self, values: dict):
         if not wandb or not self.run:
