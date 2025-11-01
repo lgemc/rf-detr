@@ -63,6 +63,11 @@ class ModelConfig(BaseModel):
     dinov3_weights_path: Optional[str] = None # e.g., r"C:\models\dinov3-vitb16.pth"
     dinov3_hf_token: Optional[str] = None     # or rely on HUGGINGFACE_HUB_TOKEN
     dinov3_prefer_hf: bool = True             # try HF first, then hub fallback
+    ia_bce_loss: bool = True
+    cls_loss_coef: float = 1.0
+    segmentation_head: bool = False
+    mask_downsample_ratio: int = 4
+
 
     # force /16 for v3
     @field_validator("patch_size", mode="after")
@@ -200,6 +205,18 @@ class RFDETRMediumConfig(RFDETRBaseConfig):
     positional_encoding_size: int = 36
     pretrain_weights: Optional[str] = "rf-detr-medium.pth"
 
+class RFDETRSegPreviewConfig(RFDETRBaseConfig):
+    segmentation_head: bool = True
+    out_feature_indexes: List[int] = [3, 6, 9, 12]
+    num_windows: int = 2
+    dec_layers: int = 4
+    patch_size: int = 12
+    resolution: int = 432
+    positional_encoding_size: int = 36
+    num_queries: int = 200
+    num_select: int = 200
+    pretrain_weights: Optional[str] = "rf-detr-seg-preview.pt"
+    num_classes: int = 90
 
 class TrainConfig(BaseModel):
     lr: float = 1e-4
@@ -211,7 +228,7 @@ class TrainConfig(BaseModel):
     ema_tau: int = 100
     lr_drop: int = 100
     checkpoint_interval: int = 10
-    warmup_epochs: int = 0
+    warmup_epochs: float = 0.0
     lr_vit_layer_decay: float = 0.8
     lr_component_decay: float = 0.7
     drop_path: float = 0.0
@@ -239,3 +256,12 @@ class TrainConfig(BaseModel):
     run: Optional[str] = None
     class_names: List[str] = None
     run_test: bool = True
+    segmentation_head: bool = False
+
+
+class SegmentationTrainConfig(TrainConfig):
+    mask_point_sample_ratio: int = 16
+    mask_ce_loss_coef: float = 5.0
+    mask_dice_loss_coef: float = 5.0
+    cls_loss_coef: float = 5.0
+    segmentation_head: bool = True
