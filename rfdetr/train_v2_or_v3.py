@@ -70,12 +70,12 @@ def main():
     class RFDETRBaseV2(RFDETRMedium):
         def get_model_config(self, **kwargs):
             # keep RF-DETR pretrain (default) for v2
-            return RFDETRMediumConfig(encoder="dinov2_windowed_small", **kwargs)
+            return RFDETRMediumConfig(encoder=encoder_name, **kwargs)
 
     class RFDETRBaseV3(RFDETRMedium):
         def get_model_config(self, **kwargs):
             # IMPORTANT: disable RF-DETR pretrain for v3 to avoid shape mismatches
-            return RFDETRMediumConfig(encoder="dinov3_base", pretrain_weights=None, **kwargs)
+            return RFDETRMediumConfig(encoder=encoder_name, pretrain_weights=None, **kwargs)
 
     # Output dir (separate subdirs so TB shows two runs side-by-side)
     if args.name:
